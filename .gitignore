@@ -24,3 +24,8 @@ _testmain.go
 *.exe
 *.test
 *.prof
+
+# Go dependencies
+vendor/
+Gopkg.toml
+Gopkg.lock
