@@ -244,3 +244,38 @@ func TestZipCrypto(t *testing.T) {
 		t.Errorf("Expected the unzipped contents to equal '%s', but was '%s' instead", contents, res.Bytes())
 	}
 }
+
+func TestZipCryptoSetMethod(t *testing.T) {
+	contents := []byte("Hello World")
+	conLen := len(contents)
+
+	raw := new(bytes.Buffer)
+	zipw := NewWriter(raw)
+
+	fh := &FileHeader{
+		Name:   "hello.txt",
+		Method: Deflate,
+	}
+	fh.SetPassword("golang")
+	fh.SetEncryptionMethod(StandardEncryption)
+	w, err := zipw.CreateHeader(fh)
+	if err != nil {
+		t.Errorf("Expected to create a new FileHeader")
+	}
+	n, err := io.Copy(w, bytes.NewReader(contents))
+	if err != nil || n != int64(conLen) {
+		t.Errorf("Expected to write the full contents to the writer.")
+	}
+	zipw.Close()
+
+	zipr, _ := NewReader(bytes.NewReader(raw.Bytes()), int64(raw.Len()))
+	zipr.File[0].SetPassword("golang")
+	r, _ := zipr.File[0].Open()
+	res := new(bytes.Buffer)
+	io.Copy(res, r)
+	r.Close()
+
+	if !bytes.Equal(contents, res.Bytes()) {
+		t.Errorf("Expected the unzipped contents to equal '%s', but was '%s' instead", contents, res.Bytes())
+	}
+}

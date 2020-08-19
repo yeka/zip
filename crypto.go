@@ -437,7 +437,8 @@ func (h *FileHeader) writeWinZipExtra() {
 	h.Extra = append(h.Extra, buf[:]...)
 }
 
-func (h *FileHeader) setEncryptionMethod(enc EncryptionMethod) {
+// SetEncryptionMethod sets the method used for encryption.
+func (h *FileHeader) SetEncryptionMethod(enc EncryptionMethod) {
 	h.encryption = enc
 	switch enc {
 	case AES128Encryption:
@@ -478,6 +479,6 @@ func (w *Writer) Encrypt(name string, password string, enc EncryptionMethod) (io
 		Method: Deflate,
 	}
 	fh.SetPassword(password)
-	fh.setEncryptionMethod(enc)
+	fh.SetEncryptionMethod(enc)
 	return w.CreateHeader(fh)
 }
