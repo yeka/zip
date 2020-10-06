@@ -1,6 +1,6 @@
 This fork add support for Standard Zip Encryption.
 
-The work is based on https://github.com/alexmullins/zip
+The work is based on https://github.com/yeka/zip
 
 Available encryption:
 
@@ -18,6 +18,17 @@ Unless you have to work with it, please use AES encryption instead.
 
 ## Example Encrypt Zip
 
+method `Encrypt("test.txt", "golang", zip.AES256Encryption, 0x800, time.Now())` it takes parameters:
+* Name File
+* Archive Password
+* Type Encrypt
+* Flag encoding
+* Date Modify File
+
+Flag 0x800 solves the problem with the file name encoding, for example, if the name was written in russian letters.
+
+Code example: 
+
 ```
 package main
 
@@ -26,8 +37,9 @@ import (
 	"io"
 	"log"
 	"os"
+	"time"
 
-	"github.com/yeka/zip"
+	"github.com/olegpolukhin/zip"
 )
 
 func main() {
@@ -38,7 +50,7 @@ func main() {
 	}
 	zipw := zip.NewWriter(fzip)
 	defer zipw.Close()
-	w, err := zipw.Encrypt(`test.txt`, `golang`, zip.AES256Encryption)
+	w, err := zipw.Encrypt(`test.txt`, `golang`, zip.AES256Encryption, 0x800, time.Now())
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -60,7 +72,7 @@ import (
 	"io/ioutil"
 	"log"
 
-	"github.com/yeka/zip"
+	"https://github.com/olegpolukhin/zip"
 )
 
 func main() {

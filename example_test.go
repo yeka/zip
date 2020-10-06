@@ -10,11 +10,12 @@ import (
 	"io"
 	"log"
 	"os"
+	"testing"
 
 	"github.com/yeka/zip"
 )
 
-func ExampleWriter() {
+func TestExampleWriter(t *testing.T) {
 	// Create a buffer to write our archive to.
 	buf := new(bytes.Buffer)
 
@@ -47,7 +48,7 @@ func ExampleWriter() {
 	}
 }
 
-func ExampleReader() {
+func TestExampleReader(t *testing.T) {
 	// Open a zip archive for reading.
 	r, err := zip.OpenReader("testdata/readme.zip")
 	if err != nil {
@@ -75,7 +76,7 @@ func ExampleReader() {
 	// This is the source code repository for the Go programming language.
 }
 
-func ExampleWriter_Encrypt() {
+func TestExampleWriter_Encrypt(t *testing.T) {
 	contents := []byte("Hello World")
 
 	// write a password zip
