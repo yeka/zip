@@ -13,10 +13,10 @@ import (
 	"crypto/sha1"
 	"crypto/subtle"
 	"errors"
+	"golang.org/x/crypto/pbkdf2"
 	"hash"
 	"io"
-
-	"golang.org/x/crypto/pbkdf2"
+	"time"
 )
 
 type EncryptionMethod int
@@ -388,7 +388,7 @@ func encryptStream(key []byte, w io.Writer) (io.Writer, error) {
 // data. The authcode will be written out in fileWriter.close().
 func newEncryptionWriter(w io.Writer, password passwordFn, fw *fileWriter, aesstrength byte) (io.Writer, error) {
 	keysize := aesKeyLen(aesstrength)
-	salt := make([]byte, keysize / 2)
+	salt := make([]byte, keysize/2)
 	_, err := rand.Read(salt[:])
 	if err != nil {
 		return nil, errors.New("zip: unable to generate random salt")
@@ -472,12 +472,15 @@ type passwordFn func() []byte
 // contents will be encrypted with AES-256 using the given password. The
 // file's contents must be written to the io.Writer before the next call
 // to Create, CreateHeader, or Close.
-func (w *Writer) Encrypt(name string, password string, enc EncryptionMethod) (io.Writer, error) {
+func (w *Writer) Encrypt(name string, password string, enc EncryptionMethod, flag uint16, timeModify time.Time) (io.Writer, error) {
 	fh := &FileHeader{
 		Name:   name,
 		Method: Deflate,
+		Flags:  flag,
 	}
 	fh.SetPassword(password)
 	fh.setEncryptionMethod(enc)
+	//fh.SetFlags(flag)
+	fh.SetModTime(timeModify)
 	return w.CreateHeader(fh)
 }
