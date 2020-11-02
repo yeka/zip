@@ -12,7 +12,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/hillu/go-archive-zip-crypto"
+	"github.com/kdungs/zip"
 )
 
 func ExampleWriter() {
