@@ -13,7 +13,7 @@ func TestPasswordReadSimple(t *testing.T) {
 	var buf bytes.Buffer
 	r, err := OpenReader(filepath.Join("testdata", file))
 	if err != nil {
-		t.Errorf("Expected %s to open: %v.", file, err)
+		t.Fatalf("Expected %s to open: %v.", file, err)
 	}
 	defer r.Close()
 	if len(r.File) != 1 {
@@ -29,7 +29,7 @@ func TestPasswordReadSimple(t *testing.T) {
 	f.SetPassword("golang")
 	rc, err := f.Open()
 	if err != nil {
-		t.Errorf("Expected to open the readcloser: %v.", err)
+		t.Fatalf("Expected to open the readcloser: %v.", err)
 	}
 	_, err = io.Copy(&buf, rc)
 	if err != nil {
@@ -56,12 +56,12 @@ func TestPasswordHelloWorldAes(t *testing.T) {
 	var b bytes.Buffer
 	for _, f := range r.File {
 		if !f.IsEncrypted() {
-			t.Errorf("Expected %s to be encrypted.", f.FileInfo().Name)
+			t.Errorf("Expected %s to be encrypted.", f.FileInfo().Name())
 		}
 		f.SetPassword("golang")
 		rc, err := f.Open()
 		if err != nil {
-			t.Errorf("Expected to open readcloser: %v", err)
+			t.Fatalf("Expected to open readcloser: %v", err)
 		}
 		defer rc.Close()
 		if _, err := io.Copy(&b, rc); err != nil {
@@ -91,7 +91,7 @@ func TestPasswordMacbethAct1(t *testing.T) {
 		f.SetPassword("golang")
 		rc, err := f.Open()
 		if err != nil {
-			t.Errorf("Expected to open readcloser: %v", err)
+			t.Fatalf("Expected to open readcloser: %v", err)
 		}
 		defer rc.Close()
 		if _, err := io.Copy(&b, rc); err != nil {
@@ -131,7 +131,7 @@ func TestPasswordAE1BadCRC(t *testing.T) {
 		f.SetPassword("golang")
 		rc, err := f.Open()
 		if err != nil {
-			t.Errorf("Expected the readcloser to open.")
+			t.Fatalf("Expected the readcloser to open.")
 		}
 		defer rc.Close()
 		if _, err := io.Copy(buf, rc); err != ErrChecksum {
@@ -162,7 +162,7 @@ func TestPasswordTamperedData(t *testing.T) {
 		f.SetPassword("golang")
 		rc, err := f.Open()
 		if err != nil {
-			t.Errorf("Expected the readcloser to open.")
+			t.Fatalf("Expected the readcloser to open.")
 		}
 		defer rc.Close()
 		if _, err := io.Copy(buf, rc); err != ErrAuthentication {
@@ -224,6 +224,41 @@ func TestZipCrypto(t *testing.T) {
 	raw := new(bytes.Buffer)
 	zipw := NewWriter(raw)
 	w, err := zipw.Encrypt("hello.txt", "golang", StandardEncryption)
+	if err != nil {
+		t.Errorf("Expected to create a new FileHeader")
+	}
+	n, err := io.Copy(w, bytes.NewReader(contents))
+	if err != nil || n != int64(conLen) {
+		t.Errorf("Expected to write the full contents to the writer.")
+	}
+	zipw.Close()
+
+	zipr, _ := NewReader(bytes.NewReader(raw.Bytes()), int64(raw.Len()))
+	zipr.File[0].SetPassword("golang")
+	r, _ := zipr.File[0].Open()
+	res := new(bytes.Buffer)
+	io.Copy(res, r)
+	r.Close()
+
+	if !bytes.Equal(contents, res.Bytes()) {
+		t.Errorf("Expected the unzipped contents to equal '%s', but was '%s' instead", contents, res.Bytes())
+	}
+}
+
+func TestZipCryptoSetMethod(t *testing.T) {
+	contents := []byte("Hello World")
+	conLen := len(contents)
+
+	raw := new(bytes.Buffer)
+	zipw := NewWriter(raw)
+
+	fh := &FileHeader{
+		Name:   "hello.txt",
+		Method: Deflate,
+	}
+	fh.SetPassword("golang")
+	fh.SetEncryptionMethod(StandardEncryption)
+	w, err := zipw.CreateHeader(fh)
 	if err != nil {
 		t.Errorf("Expected to create a new FileHeader")
 	}
