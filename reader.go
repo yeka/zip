@@ -124,7 +124,7 @@ func (rc *ReadCloser) Close() error {
 // Most callers should instead use Open, which transparently
 // decompresses data and verifies checksums.
 func (f *File) DataOffset() (offset int64, err error) {
-	bodyOffset, err := f.findBodyOffset()
+	bodyOffset, err := f.getHeaderLength()
 	if err != nil {
 		return
 	}
@@ -134,9 +134,9 @@ func (f *File) DataOffset() (offset int64, err error) {
 // Open returns a ReadCloser that provides access to the File's contents.
 // Multiple files may be read concurrently.
 func (f *File) Open() (rc io.ReadCloser, err error) {
-	bodyOffset, err := f.findBodyOffset()
+	bodyOffset, err := f.getHeaderLength()
 	if err != nil {
-		return
+		return nil, err
 	}
 	// If f is encrypted, CompressedSize64 includes salt, pwvv, encrypted data,
 	// and auth code lengths
@@ -145,13 +145,12 @@ func (f *File) Open() (rc io.ReadCloser, err error) {
 	rr := io.NewSectionReader(f.zipr, f.headerOffset+bodyOffset, size)
 	// check for encryption
 	if f.IsEncrypted() {
-
 		if f.ae == 0 {
-			if r, err = ZipCryptoDecryptor(rr, f.password()); err != nil {
-				return
+			if r, err = ZipCryptoDecryptor(rr, f); err != nil {
+				return nil, err
 			}
 		} else if r, err = newDecryptionReader(rr, f); err != nil {
-			return
+			return nil, err
 		}
 	} else {
 		r = rr
@@ -159,12 +158,12 @@ func (f *File) Open() (rc io.ReadCloser, err error) {
 	dcomp := decompressor(f.Method)
 	if dcomp == nil {
 		err = ErrAlgorithm
-		return
+		return nil, err
 	}
 	rc = dcomp(r)
 	// If AE-2, skip CRC and possible dataDescriptor
 	if f.isAE2() {
-		return
+		return rc, nil
 	}
 	var desr io.Reader
 	if f.hasDataDescriptor() {
@@ -176,7 +175,7 @@ func (f *File) Open() (rc io.ReadCloser, err error) {
 		f:    f,
 		desr: desr,
 	}
-	return
+	return rc, nil
 }
 
 type checksumReader struct {
@@ -227,9 +226,9 @@ func (r *checksumReader) Read(b []byte) (n int, err error) {
 
 func (r *checksumReader) Close() error { return r.rc.Close() }
 
-// findBodyOffset does the minimum work to verify the file has a header
+// getHeaderLength does the minimum work to verify the file has a header
 // and returns the file body offset.
-func (f *File) findBodyOffset() (int64, error) {
+func (f *File) getHeaderLength() (int64, error) {
 	var buf [fileHeaderLen]byte
 	if _, err := f.zipr.ReadAt(buf[:], f.headerOffset); err != nil {
 		return 0, err

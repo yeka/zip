@@ -40,6 +40,54 @@ func TestPasswordReadSimple(t *testing.T) {
 	}
 }
 
+func TestPasswordStandard(t *testing.T) {
+	type args struct {
+		fp string
+		pw string
+	}
+	tests := []struct {
+		name    string
+		wantErr bool
+		args    args
+	}{
+		{
+			name: "correct password",
+			args: args{
+				fp: "testdata/password-abc.zip",
+				pw: "abc",
+			},
+			wantErr: false,
+		}, {
+			name: "wrong password",
+			args: args{
+				fp: "testdata/password-abc.zip",
+				pw: "abcd",
+			},
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Logf("TestName: %s", tt.name)
+		r, err := OpenReader(tt.args.fp)
+		if err != nil {
+			t.Errorf("Expected %s to open: %v.", tt.args.fp, err)
+		}
+		defer r.Close()
+		if len(r.File) != 1 {
+			t.Errorf("Expected %s to contain one file.", tt.args.fp)
+		}
+		f := r.File[0]
+		f.SetPassword(tt.args.pw)
+		_, err = f.Open()
+		if err != nil && !tt.wantErr {
+			t.Errorf("Expected to open the readcloser: %v.", err)
+		}
+		if err == nil && tt.wantErr {
+			t.Errorf("Expected not to open the readcloser: %v.", err)
+		}
+	}
+}
+
 // Test for multi-file password protected zip.
 // Each file can be protected with a different password.
 func TestPasswordHelloWorldAes(t *testing.T) {
