@@ -5,6 +5,7 @@ import (
 	"io"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // Test simple password reading.
@@ -235,6 +236,14 @@ func TestZipCrypto(t *testing.T) {
 
 	zipr, _ := NewReader(bytes.NewReader(raw.Bytes()), int64(raw.Len()))
 	zipr.File[0].SetPassword("golang")
+
+	modifiedTime := zipr.File[0].FileHeader.ModTime()
+	duration := time.Since(modifiedTime)
+	// Take care of the 2 seconds granularity
+	if duration.Seconds() <= -2000 || 4 <= duration.Seconds() {
+		t.Errorf("Modified time is expected to be very recent")
+	}
+
 	r, _ := zipr.File[0].Open()
 	res := new(bytes.Buffer)
 	io.Copy(res, r)
