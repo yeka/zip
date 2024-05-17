@@ -210,7 +210,7 @@ func (w *Writer) CreateHeader(fh *FileHeader) (io.Writer, error) {
 		return nil, errors.New("archive/zip: invalid duplicate FileHeader")
 	}
 
-	fh.Flags |= 0x8 // we will write a data descriptor
+	fh.Flags |= 0x800 // we will write a data descriptor
 	// TODO(alex): Look at spec and see if these need to be changed
 	// when using encryption.
 	fh.CreatorVersion = fh.CreatorVersion&0xff00 | zipVersion20 // preserve compatibility byte
