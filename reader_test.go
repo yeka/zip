@@ -579,7 +579,7 @@ func TestIssue10956(t *testing.T) {
 		"0000\v\x00000\x00\x00\x00\x00\x00\x00\x000")
 	_, err := NewReader(bytes.NewReader(data), int64(len(data)))
 	const want = "TOC declares impossible 3472328296227680304 files in 57 byte"
-	if err == nil && !strings.Contains(err.Error(), want) {
+	if err == nil || !strings.Contains(err.Error(), want) {
 		t.Errorf("error = %v; want %q", err, want)
 	}
 }
