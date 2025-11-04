@@ -73,7 +73,8 @@ func ZipCryptoDecryptor(r *io.SectionReader, password []byte) (*io.SectionReader
 	r.Read(b)
 
 	m := z.Decrypt(b)
-	return io.NewSectionReader(bytes.NewReader(m), 12, int64(len(m))), nil
+	return io.NewSectionReader(bytes.NewReader(m), 12, int64(len(m)-12)), nil
+}
 }
 
 type zipCryptoWriter struct {
