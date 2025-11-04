@@ -605,3 +605,56 @@ func TestIssue11146(t *testing.T) {
 	}
 	r.Close()
 }
+
+// Verify that the length is correct when using zipcrypto (standard encryption)
+func TestZipCryptoLength(t *testing.T) {
+	contents := []byte{0}
+	password := "password"
+	buf := new(bytes.Buffer)
+	zipw := NewWriter(buf)
+	w, err := zipw.Encrypt("test.txt", password, StandardEncryption)
+	if err != nil {
+		t.Fatal("Encrypt():", err)
+	}
+	if _, err := io.Copy(w, bytes.NewReader(contents)); err != nil {
+		t.Fatal("io.Copy():", err)
+	}
+	zipw.Close()
+	zipr, err := NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+	if err != nil {
+		t.Fatal("NewReader():", err)
+	}
+	f := zipr.File[0]
+	if !f.IsEncrypted() {
+		t.Fatal("Expected file to be encrypted")
+	}
+	f.SetPassword(password)
+
+	bodyOffset, err := f.findBodyOffset()
+	if err != nil {
+		t.Fatal("findBodyOffset():", err)
+	}
+	size := int64(f.CompressedSize64)
+	sr := io.NewSectionReader(f.zipr, f.headerOffset+bodyOffset, size)
+	r, err := ZipCryptoDecryptor(sr, []byte(password))
+	if err != nil {
+		t.Fatal("ZipCryptoDecryptor():", err)
+	}
+
+	// SectionReader should have Size() = (encrypted_size - 12 byte header)
+	expectedSize := size - 12
+
+	if r.Size() != expectedSize {
+		t.Errorf("SeectionReader.Size() incorrect - want: %d, got: %d", expectedSize, r.Size())
+	}
+
+	readBuf := make([]byte, r.Size())
+	n, err := io.ReadFull(r, readBuf)
+	if err != nil {
+		t.Errorf("ReadFull(): unexpected error: %v", err)
+	}
+
+	if n != int(r.Size()) {
+		t.Errorf("ReadFull(): expected promised %d bytes, got: %d", r.Size(), n)
+	}
+}
