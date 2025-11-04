@@ -658,3 +658,73 @@ func TestZipCryptoLength(t *testing.T) {
 		t.Errorf("ReadFull(): expected promised %d bytes, got: %d", r.Size(), n)
 	}
 }
+
+// Ensure that password verification works.
+func TestPasswordVerification(t *testing.T) {
+	contents := []byte("Hello World")
+	goodPassword := "password"
+
+	tryPasswords := []string{
+		"badpassword1",
+		"badpassword2",
+		goodPassword,
+	}
+
+	type PWTest struct {
+		methodName string
+		method     EncryptionMethod
+	}
+
+	for _, pwTest := range []PWTest{
+		{"StandardEncryption", StandardEncryption},
+		{"AES128Encryption", AES128Encryption},
+		{"AES192Encryption", AES192Encryption},
+		{"AES256Encryption", AES256Encryption},
+	} {
+		t.Run(pwTest.methodName, func(t *testing.T) {
+			raw := new(bytes.Buffer)
+			zipw := NewWriter(raw)
+			w, err := zipw.Encrypt("hello.txt", "password", pwTest.method)
+			if err != nil {
+				t.Fatal("Encrypt():", err)
+			}
+			_, err = io.Copy(w, bytes.NewReader(contents))
+			if err != nil {
+				t.Fatal("io.Copy():", err)
+			}
+			zipw.Close()
+
+			zipr, err := NewReader(bytes.NewReader(raw.Bytes()), int64(raw.Len()))
+			if err != nil {
+				t.Fatal("NewReader():", err)
+			}
+			f := zipr.File[0]
+			if !f.IsEncrypted() {
+				t.Fatal("Expected file to be encrypted")
+			}
+			var rc io.ReadCloser
+			for _, password := range tryPasswords {
+				f.SetPassword(password)
+				rc, err = f.Open()
+				if password == goodPassword {
+					if err != nil {
+						t.Fatal("Expect nil error for good password - got:", err)
+					}
+				} else {
+					t.Log("bad password:", password)
+					if !errors.Is(err, ErrPassword) {
+						t.Error("Expected ErrPassword for bad password - got:", err)
+					}
+				}
+			}
+			got, err := io.ReadAll(rc)
+			if err != nil {
+				t.Fatal("ReadALL():", err)
+			}
+			if !bytes.Equal(got, contents) {
+				t.Errorf("File contents different - want: %q, got %q", contents, got)
+			}
+		})
+
+	}
+}
