@@ -66,6 +66,10 @@ func crc32update(pCrc32 uint32, bval byte) uint32 {
 	return crc32.IEEETable[(pCrc32 ^ uint32(bval)) & 0xff] ^ (pCrc32 >> 8)
 }
 
+// ZipCryptoDecryptor decrypts a section reader with standard zip decryption
+//
+// Deprecated: ZipCryptoDecryptor exists for historical compatibility and does not do any password validation. Please
+// use [Open] instead, which will automatically detect a ZipCrypto-encrypted file and check the password automatically.
 func ZipCryptoDecryptor(r *io.SectionReader, password []byte) (*io.SectionReader, error) {
 	z := NewZipCrypto(password)
 	b := make([]byte, r.Size())
@@ -75,6 +79,36 @@ func ZipCryptoDecryptor(r *io.SectionReader, password []byte) (*io.SectionReader
 	m := z.Decrypt(b)
 	return io.NewSectionReader(bytes.NewReader(m), 12, int64(len(m)-12)), nil
 }
+
+func newZipCryptoReader(r *io.SectionReader, f *File) (io.Reader, error) {
+	z := NewZipCrypto(f.password())
+	b := make([]byte, r.Size())
+	r.Read(b)
+
+	m := z.Decrypt(b)
+
+	// ZipCrypto password verification is done by comparing byte 11 of the decrypted encryption header with either the
+	// high byte of ModifiedTime (used most implementation) or the high byte of the CRC value (antiquated, but retained
+	// for compatibility).
+	var expectedByte byte
+
+	// If bit 3 is set in the general purpose bitflags (almost always), there's no legacy CRC, and we use the high byte
+	// of ModifiedTime for password verification.
+	if f.Flags&0x8 != 0 {
+		expectedByte = byte(f.ModifiedTime >> 8)
+	} else {
+		// Otherwise use the high byte of the CRC for legacy compatibility.
+		if f.CRC32 == 0 {
+			return nil, ErrFormat
+		}
+		expectedByte = byte(f.CRC32 >> 24)
+	}
+
+	if m[11] != expectedByte {
+		return nil, ErrPassword
+	}
+
+	return io.NewSectionReader(bytes.NewReader(m), 12, int64(len(m)-12)), nil
 }
 
 type zipCryptoWriter struct {
