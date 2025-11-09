@@ -13,79 +13,126 @@ import (
 	"hash/crc32"
 	"io"
 	"os"
+	"strings"
 )
 
 var (
-	ErrFormat    = errors.New("zip: not a valid zip file")
-	ErrAlgorithm = errors.New("zip: unsupported compression algorithm")
-	ErrChecksum  = errors.New("zip: checksum error")
+	ErrFormat            = errors.New("zip: not a valid zip file")
+	ErrAlgorithm         = errors.New("zip: unsupported compression algorithm")
+	ErrChecksum          = errors.New("zip: checksum error")
+	ErrPartCountMismatch = errors.New("zip: part count mismatch")
 )
 
+type SizeReaderAt interface {
+	Size() int64
+	io.ReaderAt
+}
+
 type Reader struct {
-	r       io.ReaderAt
+	r       []SizeReaderAt
 	File    []*File
 	Comment string
 }
 
 type ReadCloser struct {
-	f *os.File
+	f []io.Closer
 	Reader
 }
 
 type File struct {
 	FileHeader
-	zipr         io.ReaderAt
-	zipsize      int64
+	zipr         SizeReaderAt
 	headerOffset int64
+	diskNb       int32
 }
 
 func (f *File) hasDataDescriptor() bool {
 	return f.Flags&0x8 != 0
 }
 
-// OpenReader will open the Zip file specified by name and return a ReadCloser.
-func OpenReader(name string) (*ReadCloser, error) {
+func openPart(name string, idx int) (*os.File, int64, error) {
+	if idx > 0 {
+		name = fmt.Sprintf("%s.z%02d", strings.TrimSuffix(name, ".zip"), idx)
+	}
 	f, err := os.Open(name)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	fi, err := f.Stat()
 	if err != nil {
-		f.Close()
-		return nil, err
+		_ = f.Close()
+		return nil, 0, err
 	}
-	r := new(ReadCloser)
-	if err := r.init(f, fi.Size()); err != nil {
-		f.Close()
-		return nil, err
+	return f, fi.Size(), nil
+}
+
+// OpenReader will open the Zip file specified by name and return a ReadCloser.
+func OpenReader(name string) (r *ReadCloser, err error) {
+	part := 0
+	closers := make([]io.Closer, 0)
+	parts := make([]SizeReaderAt, 0)
+	for {
+		f, size, e := openPart(name, part)
+		if e != nil {
+			err = e
+			break
+		}
+		part += 1
+		closers = append(closers, f)
+		parts = append(parts, io.NewSectionReader(f, 0, size))
 	}
-	r.f = f
-	return r, nil
+	if part == 0 {
+		return
+	} else if part > 1 {
+		closers = append(closers[1:], closers[0])
+		parts = append(parts[1:], parts[0])
+	}
+	r = new(ReadCloser)
+	r.f = closers
+	if err = r.init(parts); err != nil {
+		_ = r.Close()
+		r = nil
+	}
+	return
 }
 
 // NewReader returns a new Reader reading from r, which is assumed to
 // have the given size in bytes.
 func NewReader(r io.ReaderAt, size int64) (*Reader, error) {
 	zr := new(Reader)
-	if err := zr.init(r, size); err != nil {
+	single := []SizeReaderAt{io.NewSectionReader(r, 0, size)}
+	if err := zr.init(single); err != nil {
 		return nil, err
 	}
 	return zr, nil
 }
 
-func (z *Reader) init(r io.ReaderAt, size int64) error {
-	end, err := readDirectoryEnd(r, size)
+func NewMultipartReader(r []SizeReaderAt) (*Reader, error) {
+	zr := new(Reader)
+	if err := zr.init(r); err != nil {
+		return nil, err
+	}
+	return zr, nil
+}
+
+func (z *Reader) init(r []SizeReaderAt) error {
+	lastPart := r[len(r)-1]
+	lastPartSize := lastPart.Size()
+	end, err := readDirectoryEnd(lastPart, lastPartSize)
 	if err != nil {
 		return err
 	}
-	if end.directoryRecords > uint64(size)/fileHeaderLen {
-		return fmt.Errorf("archive/zip: TOC declares impossible %d files in %d byte zip", end.directoryRecords, size)
+	if int(end.diskNbr) != len(r)-1 {
+		return ErrPartCountMismatch
+	}
+	if end.directoryRecords > uint64(lastPart.Size())/fileHeaderLen {
+		return fmt.Errorf("archive/zip: TOC declares impossible %d files in %d byte zip", end.directoryRecords, lastPartSize)
 	}
 	z.r = r
 	z.File = make([]*File, 0, end.directoryRecords)
 	z.Comment = end.comment
-	rs := io.NewSectionReader(r, 0, size)
-	if _, err = rs.Seek(int64(end.directoryOffset), os.SEEK_SET); err != nil {
+	rs := io.NewSectionReader(lastPart, 0, lastPartSize)
+	if _, err = rs.Seek(int64(end.directoryOffset), io.SeekStart); err != nil {
 		return err
 	}
 	buf := bufio.NewReader(rs)
@@ -95,9 +142,9 @@ func (z *Reader) init(r io.ReaderAt, size int64) error {
 	// a bad one, and then only report a ErrFormat or UnexpectedEOF if
 	// the file count modulo 65536 is incorrect.
 	for {
-		f := &File{zipr: r, zipsize: size}
+		f := &File{zipr: &mergedSizeReaderAt{r}}
 		err = readDirectoryHeader(f, buf)
-		if err == ErrFormat || err == io.ErrUnexpectedEOF {
+		if errors.Is(err, ErrFormat) || errors.Is(err, io.ErrUnexpectedEOF) {
 			break
 		}
 		if err != nil {
@@ -115,7 +162,11 @@ func (z *Reader) init(r io.ReaderAt, size int64) error {
 
 // Close closes the Zip file, rendering it unusable for I/O.
 func (rc *ReadCloser) Close() error {
-	return rc.f.Close()
+	var err error
+	for _, fp := range rc.f {
+		err = errors.Join(err, fp.Close())
+	}
+	return err
 }
 
 // DataOffset returns the offset of the file's possibly-compressed
@@ -270,7 +321,8 @@ func readDirectoryHeader(f *File, r io.Reader) error {
 	filenameLen := int(b.uint16())
 	extraLen := int(b.uint16())
 	commentLen := int(b.uint16())
-	b = b[4:] // skipped start disk number and internal attributes (2x uint16)
+	f.diskNb = int32(b.uint16())
+	b = b[2:] // skipped internal attributes (2x uint16)
 	f.ExternalAttrs = b.uint32()
 	f.headerOffset = int64(b.uint32())
 	d := make([]byte, filenameLen+extraLen+commentLen)
@@ -301,6 +353,9 @@ func readDirectoryHeader(f *File, r io.Reader) error {
 				}
 				if len(eb) >= 8 {
 					f.headerOffset = int64(eb.uint64())
+				}
+				if len(eb) >= 4 {
+					f.diskNb = int32(eb.uint32())
 				}
 			case winzipAesExtraId:
 				// grab the AE version
@@ -504,4 +559,41 @@ func (b *readBuf) uint64() uint64 {
 	v := binary.LittleEndian.Uint64(*b)
 	*b = (*b)[8:]
 	return v
+}
+
+type mergedSizeReaderAt struct {
+	rs []SizeReaderAt
+}
+
+func (r *mergedSizeReaderAt) ReadAt(p []byte, off int64) (int, error) {
+	pi := 0
+	for pi < len(r.rs) && off >= r.rs[pi].Size() && pi < len(r.rs) {
+		off -= r.rs[pi].Size()
+		pi += 1
+	}
+	if pi >= len(p) {
+		return 0, io.EOF
+	}
+	num := 0
+	for pi < len(r.rs) && num < len(p) {
+		n, err := r.rs[pi].ReadAt(p[num:], off)
+		num += n
+		if err != nil && !errors.Is(err, io.EOF) {
+			return num, err
+		}
+		pi += 1
+		off = 0
+	}
+	if num < len(p) {
+		return num, io.EOF
+	}
+	return num, nil
+}
+
+func (r *mergedSizeReaderAt) Size() int64 {
+	var s int64 = 0
+	for _, ra := range r.rs {
+		s += ra.Size()
+	}
+	return s
 }
