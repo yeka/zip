@@ -16,6 +16,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"go4.org/readerutil"
 )
 
 type ZipTest struct {
@@ -432,6 +434,181 @@ func TestInvalidFiles(t *testing.T) {
 	}
 }
 
+func TestNewMultipartReader(t *testing.T) {
+	expectedFilesPng := map[string]int{
+		"Users/nikko/Downloads/HeaderRight.png": 152499,
+	}
+	testCases := []struct {
+		name string
+		// the order of the path matters, .zip should be last
+		paths    []string
+		password string
+		// key val of filename and content len
+		files           map[string]int
+		expectedReadErr string
+		expectedOpenErr string
+	}{
+		{
+			name: "success non-protected",
+			paths: []string{
+				"./testdata/multipart/datasplit.z01",
+				"./testdata/multipart/datasplit.z02",
+				"./testdata/multipart/datasplit.zip",
+			},
+			files: expectedFilesPng,
+		},
+		{
+			name: "success non-protected - z64",
+			paths: []string{
+				"./testdata/multipart/datasplit-z64.z01",
+				"./testdata/multipart/datasplit-z64.z02",
+				"./testdata/multipart/datasplit-z64.zip",
+			},
+			files: expectedFilesPng,
+		},
+		{
+			name: "success protected",
+			paths: []string{
+				"./testdata/multipart/datasplit-protected.z01",
+				"./testdata/multipart/datasplit-protected.z02",
+				"./testdata/multipart/datasplit-protected.zip",
+			},
+			password: "test123",
+			files:    expectedFilesPng,
+		},
+		{
+			name: "success protected - z64",
+			paths: []string{
+				"./testdata/multipart/datasplit-protected-z64.z01",
+				"./testdata/multipart/datasplit-protected-z64.z02",
+				"./testdata/multipart/datasplit-protected-z64.zip",
+			},
+			password: "test123",
+			files:    expectedFilesPng,
+		},
+		{
+			name: "success protected - multifiles multipart",
+			paths: []string{
+				"./testdata/multipart/datasplit-protected-multifiles.z01",
+				"./testdata/multipart/datasplit-protected-multifiles.z02",
+				"./testdata/multipart/datasplit-protected-multifiles.zip",
+			},
+			files: map[string]int{
+				"file1.txt": 53337,
+				"file2.txt": 53337,
+				"file3.txt": 53337,
+			},
+			password: "golang",
+		},
+		{
+			name: "success non-protected - multifiles multipart",
+			paths: []string{
+				"./testdata/multipart/datasplit-multifiles.z01",
+				"./testdata/multipart/datasplit-multifiles.z02",
+				"./testdata/multipart/datasplit-multifiles.zip",
+			},
+			files: map[string]int{
+				"file1.txt": 53337,
+				"file2.txt": 53337,
+				"file3.txt": 53337,
+			},
+		},
+		{
+			name: "failed protected - incorrect password",
+			paths: []string{
+				"./testdata/multipart/datasplit-protected.z01",
+				"./testdata/multipart/datasplit-protected.z02",
+				"./testdata/multipart/datasplit-protected.zip",
+			},
+			password:        "wrong",
+			files:           expectedFilesPng,
+			expectedReadErr: "flate: corrupt input before offset 1",
+		},
+		{
+			name: "failed protected - no password supplied",
+			paths: []string{
+				"./testdata/multipart/datasplit-protected.z01",
+				"./testdata/multipart/datasplit-protected.z02",
+				"./testdata/multipart/datasplit-protected.zip",
+			},
+			files:           expectedFilesPng,
+			expectedOpenErr: "zip: invalid password",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			parts := []readerutil.SizeReaderAt{}
+			for _, path := range tc.paths {
+				f, err := os.Open(path)
+				if err != nil {
+					t.Fatalf("Failed to open multipart zip part %s: %v", path, err)
+				}
+				defer f.Close()
+				stat, err := f.Stat()
+				if err != nil {
+					t.Fatalf("Failed to stat multipart zip file: %v", err)
+				}
+				parts = append(parts, io.NewSectionReader(f, 0, stat.Size()))
+			}
+
+			zr, err := NewMultipartReader(parts)
+			if err != nil {
+				t.Fatalf("Failed to create multipart reader: %v", err)
+			}
+
+			if got, want := len(zr.File), len(tc.files); got != want {
+				t.Fatalf("multipart reader returned %d files, want %d", got, want)
+			}
+
+			for _, f := range zr.File {
+				if _, ok := tc.files[f.Name]; !ok {
+					t.Fatalf("unexpected entry name: got %q", f.Name)
+				}
+
+				if tc.password != "" {
+					if !f.IsEncrypted() {
+						t.Fatalf("expected file %q to be encrypted", f.Name)
+					}
+					f.SetPassword(tc.password)
+				}
+
+				r, err := f.Open()
+
+				if tc.expectedOpenErr != "" {
+					if err.Error() != tc.expectedOpenErr {
+						t.Fatalf("expected error %q, got %q", tc.expectedOpenErr, err)
+					}
+					return
+				}
+
+				if err != nil {
+					t.Fatalf("Failed to open %s: %v", f.Name, err)
+				}
+				defer r.Close()
+
+				buf, err := io.ReadAll(r)
+
+				if tc.expectedReadErr != "" {
+					if err.Error() != tc.expectedReadErr {
+						t.Fatalf("expected error %q, got %q", tc.expectedReadErr, err)
+					}
+					return
+				}
+
+				if got, want := len(buf), int(f.UncompressedSize64); got != want {
+					t.Fatalf("read %d bytes, want %d", got, want)
+				}
+
+				if got, want := len(buf), tc.files[f.Name]; got != want {
+					t.Fatalf("unexpected size for %s: got %d, want %d", f.Name, got, want)
+				}
+
+			}
+		})
+	}
+}
+
 func messWith(fileName string, corrupter func(b []byte)) (r io.ReaderAt, size int64) {
 	data, err := ioutil.ReadFile(filepath.Join("testdata", fileName))
 	if err != nil {
@@ -578,7 +755,7 @@ func TestIssue10956(t *testing.T) {
 		"0000\v\x00000\x00\x00\x00\x00\x00\x00\x000")
 	_, err := NewReader(bytes.NewReader(data), int64(len(data)))
 	const want = "TOC declares impossible 3472328296227680304 files in 57 byte"
-	if err == nil && !strings.Contains(err.Error(), want) {
+	if err == nil || !strings.Contains(err.Error(), want) {
 		t.Errorf("error = %v; want %q", err, want)
 	}
 }
