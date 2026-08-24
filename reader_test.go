@@ -324,7 +324,7 @@ func readTestZip(t *testing.T, zt ZipTest) {
 	// test simultaneous reads
 	n := 0
 	done := make(chan bool)
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		for j, ft := range zt.File {
 			go func(j int, ft ZipTestFile) {
 				readTestFile(t, zt, ft, z.File[j])
@@ -383,7 +383,7 @@ func readTestFile(t *testing.T, zt ZipTest, ft ZipTestFile, f *File) {
 	var c []byte
 	if ft.Content != nil {
 		c = ft.Content
-	} else if c, err = ioutil.ReadFile("testdata/" + ft.File); err != nil {
+	} else if c, err = os.ReadFile("testdata/" + ft.File); err != nil {
 		t.Error(err)
 		return
 	}
@@ -433,7 +433,7 @@ func TestInvalidFiles(t *testing.T) {
 }
 
 func messWith(fileName string, corrupter func(b []byte)) (r io.ReaderAt, size int64) {
-	data, err := ioutil.ReadFile(filepath.Join("testdata", fileName))
+	data, err := os.ReadFile(filepath.Join("testdata", fileName))
 	if err != nil {
 		panic("Error reading " + fileName + ": " + err.Error())
 	}
@@ -599,7 +599,7 @@ func TestIssue11146(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = ioutil.ReadAll(r)
+	_, err = io.ReadAll(r)
 	if err != io.ErrUnexpectedEOF {
 		t.Errorf("File[0] error = %v; want io.ErrUnexpectedEOF", err)
 	}

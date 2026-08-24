@@ -7,7 +7,7 @@ package zip
 import (
 	"bytes"
 	"io"
-	"io/ioutil"
+
 	"math/rand"
 	"os"
 	"testing"
@@ -167,7 +167,7 @@ func testReadFile(t *testing.T, f *File, wt *WriteTest) {
 	if err != nil {
 		t.Fatal("opening:", err)
 	}
-	b, err := ioutil.ReadAll(rc)
+	b, err := io.ReadAll(rc)
 	if err != nil {
 		t.Fatal("reading:", err)
 	}
@@ -187,7 +187,7 @@ func BenchmarkCompressedZipGarbage(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		buf.Reset()
 		zw := NewWriter(&buf)
-		for j := 0; j < 3; j++ {
+		for range 3 {
 			w, _ := zw.CreateHeader(&FileHeader{
 				Name:   "foo",
 				Method: Deflate,

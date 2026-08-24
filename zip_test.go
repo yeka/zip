@@ -11,7 +11,7 @@ import (
 	"fmt"
 	"hash"
 	"io"
-	"io/ioutil"
+
 	"sort"
 	"strings"
 	"testing"
@@ -22,7 +22,7 @@ func TestOver65kFiles(t *testing.T) {
 	buf := new(bytes.Buffer)
 	w := NewWriter(buf)
 	const nFiles = (1 << 16) + 42
-	for i := 0; i < nFiles; i++ {
+	for i := range nFiles {
 		_, err := w.CreateHeader(&FileHeader{
 			Name:   fmt.Sprintf("%d.dat", i),
 			Method: Store, // avoid Issue 6136 and Issue 6138
@@ -42,7 +42,7 @@ func TestOver65kFiles(t *testing.T) {
 	if got := len(zr.File); got != nFiles {
 		t.Fatalf("File contains %d files, want %d", got, nFiles)
 	}
-	for i := 0; i < nFiles; i++ {
+	for i := range nFiles {
 		want := fmt.Sprintf("%d.dat", i)
 		if zr.File[i].Name != want {
 			t.Fatalf("File(%d) = %q, want %q", i, zr.File[i].Name, want)
@@ -251,7 +251,7 @@ func testZip64(t testing.TB, size int64) *rleBuffer {
 	for i := range chunk {
 		chunk[i] = '.'
 	}
-	for i := 0; i < chunks; i++ {
+	for range chunks {
 		_, err := f.Write(chunk)
 		if err != nil {
 			t.Fatal("write chunk:", err)
@@ -277,13 +277,13 @@ func testZip64(t testing.TB, size int64) *rleBuffer {
 		t.Fatal("opening:", err)
 	}
 	rc.(*checksumReader).hash = fakeHash32{}
-	for i := 0; i < chunks; i++ {
+	for range chunks {
 		_, err := io.ReadFull(rc, chunk)
 		if err != nil {
 			t.Fatal("read:", err)
 		}
 	}
-	gotEnd, err := ioutil.ReadAll(rc)
+	gotEnd, err := io.ReadAll(rc)
 	if err != nil {
 		t.Fatal("read end:", err)
 	}
