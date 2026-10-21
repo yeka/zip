@@ -2,6 +2,7 @@ package zip
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"path/filepath"
 	"testing"
@@ -242,5 +243,80 @@ func TestZipCrypto(t *testing.T) {
 
 	if !bytes.Equal(contents, res.Bytes()) {
 		t.Errorf("Expected the unzipped contents to equal '%s', but was '%s' instead", contents, res.Bytes())
+	}
+}
+
+// With Store there is no compressor between the caller and the encryptor, so
+// the count returned by the encryptor's Write reaches io.Copy and the
+// uncompressed size recorded in the headers directly.
+func TestZipCryptoStore(t *testing.T) {
+	contents := bytes.Repeat([]byte("Hello World "), 1000)
+
+	raw := new(bytes.Buffer)
+	zipw := NewWriter(raw)
+	fh := &FileHeader{Name: "hello.txt", Method: Store}
+	fh.SetPassword("golang")
+	fh.SetEncryptionMethod(StandardEncryption)
+	w, err := zipw.CreateHeader(fh)
+	if err != nil {
+		t.Fatalf("CreateHeader: %v", err)
+	}
+	n, err := io.Copy(w, bytes.NewReader(contents))
+	if err != nil || n != int64(len(contents)) {
+		t.Fatalf("io.Copy = %d, %v; want %d, nil", n, err, len(contents))
+	}
+	if err := zipw.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	zipr, err := NewReader(bytes.NewReader(raw.Bytes()), int64(raw.Len()))
+	if err != nil {
+		t.Fatalf("NewReader: %v", err)
+	}
+	f := zipr.File[0]
+	if f.UncompressedSize64 != uint64(len(contents)) {
+		t.Errorf("UncompressedSize64 = %d, want %d", f.UncompressedSize64, len(contents))
+	}
+	if want := uint64(len(contents) + 12); f.CompressedSize64 != want {
+		t.Errorf("CompressedSize64 = %d, want %d (contents plus the 12-byte encryption header)", f.CompressedSize64, want)
+	}
+	f.SetPassword("golang")
+	r, err := f.Open()
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	res := new(bytes.Buffer)
+	if _, err := io.Copy(res, r); err != nil {
+		t.Fatalf("reading decrypted contents: %v", err)
+	}
+	r.Close()
+	if !bytes.Equal(contents, res.Bytes()) {
+		t.Error("decrypted contents differ from the original")
+	}
+}
+
+type errWriter struct{ err error }
+
+func (w errWriter) Write([]byte) (int, error) { return 0, w.err }
+
+func TestZipCryptoWriterCountAndErrors(t *testing.T) {
+	password := func() []byte { return []byte("golang") }
+	fw := &fileWriter{header: &header{FileHeader: &FileHeader{}}}
+
+	var buf bytes.Buffer
+	zc, _ := ZipCryptoEncryptor(&buf, password, fw)
+	for _, p := range [][]byte{[]byte("first"), []byte("second chunk")} {
+		if n, err := zc.Write(p); n != len(p) || err != nil {
+			t.Errorf("Write(%q) = %d, %v; want %d, nil", p, n, err, len(p))
+		}
+	}
+	if want := 12 + len("first") + len("second chunk"); buf.Len() != want {
+		t.Errorf("wrote %d bytes, want %d (12-byte header plus data)", buf.Len(), want)
+	}
+
+	wantErr := errors.New("disk full")
+	zc, _ = ZipCryptoEncryptor(errWriter{wantErr}, password, fw)
+	if _, err := zc.Write([]byte("data")); err != wantErr {
+		t.Errorf("Write error = %v, want %v", err, wantErr)
 	}
 }

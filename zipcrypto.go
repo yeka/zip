@@ -83,8 +83,11 @@ type zipCryptoWriter struct {
 	fw    *fileWriter
 }
 
+// Write encrypts p and writes it to the underlying writer, preceded by the
+// 12-byte encryption header on the first call. As io.Writer requires, it
+// reports how many bytes of p were consumed (the header is not counted) and
+// returns any error from the underlying writer.
 func (z *zipCryptoWriter) Write(p []byte) (n int, err error) {
-	err = nil
 	if z.first {
 		z.first = false
 		header := []byte{0xF8, 0x53, 0xCF, 0x05, 0x2D, 0xDD, 0xAD, 0xC8, 0x66, 0x3F, 0x8C, 0xAC}
@@ -95,11 +98,14 @@ func (z *zipCryptoWriter) Write(p []byte) (n int, err error) {
 		header[11] = byte(crc >> 8)
 
 		z.z.init()
-		z.w.Write(z.z.Encrypt(header))
-		n += 12
+		if _, err := z.w.Write(z.z.Encrypt(header)); err != nil {
+			return 0, err
+		}
 	}
-	z.w.Write(z.z.Encrypt(p))
-	return
+	if _, err := z.w.Write(z.z.Encrypt(p)); err != nil {
+		return 0, err
+	}
+	return len(p), nil
 }
 
 func ZipCryptoEncryptor(i io.Writer, pass passwordFn, fw *fileWriter) (io.Writer, error)  {
