@@ -6,6 +6,7 @@ package zip_test
 
 import (
 	"bytes"
+	"compress/flate"
 	"fmt"
 	"io"
 	"log"
@@ -45,6 +46,23 @@ func ExampleWriter() {
 	if err != nil {
 		log.Fatal(err)
 	}
+}
+
+func ExampleWriter_RegisterCompressor() {
+	// Override the default Deflate compressor with a higher compression level.
+
+	// Create a buffer to write our archive to.
+	buf := new(bytes.Buffer)
+
+	// Create a new zip archive.
+	w := zip.NewWriter(buf)
+
+	// Register a custom Deflate compressor.
+	w.RegisterCompressor(zip.Deflate, func(out io.Writer) (io.WriteCloser, error) {
+		return flate.NewWriter(out, flate.BestCompression)
+	})
+
+	// Proceed to add files to w.
 }
 
 func ExampleReader() {

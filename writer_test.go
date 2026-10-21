@@ -6,6 +6,7 @@ package zip
 
 import (
 	"bytes"
+	"compress/flate"
 	"io"
 	"io/ioutil"
 	"math/rand"
@@ -137,6 +138,81 @@ func TestWriterFlush(t *testing.T) {
 	}
 	if buf.Len() == 0 {
 		t.Fatal("No bytes written after Flush")
+	}
+}
+
+func TestWriterRegisterCompressor(t *testing.T) {
+	contents := bytes.Repeat([]byte("compressible "), 10000)
+
+	// write archives contents as a Deflate entry and returns its header. With
+	// noCompression, that Writer's Deflate compressor is replaced by one that
+	// stores the data uncompressed.
+	write := func(t *testing.T, enc EncryptionMethod, noCompression bool) *File {
+		buf := new(bytes.Buffer)
+		w := NewWriter(buf)
+		if noCompression {
+			w.RegisterCompressor(Deflate, func(out io.Writer) (io.WriteCloser, error) {
+				return flate.NewWriter(out, flate.NoCompression)
+			})
+		}
+		fh := &FileHeader{Name: "data.txt", Method: Deflate}
+		if enc != 0 {
+			fh.SetPassword("golang")
+			fh.SetEncryptionMethod(enc)
+		}
+		fw, err := w.CreateHeader(fh)
+		if err != nil {
+			t.Fatalf("CreateHeader: %v", err)
+		}
+		if _, err := fw.Write(contents); err != nil {
+			t.Fatalf("Write: %v", err)
+		}
+		if err := w.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+
+		r, err := NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+		if err != nil {
+			t.Fatalf("NewReader: %v", err)
+		}
+		f := r.File[0]
+		if enc != 0 {
+			f.SetPassword("golang")
+		}
+		rc, err := f.Open()
+		if err != nil {
+			t.Fatalf("Open: %v", err)
+		}
+		got, err := ioutil.ReadAll(rc)
+		rc.Close()
+		if err != nil {
+			t.Fatalf("ReadAll: %v", err)
+		}
+		if !bytes.Equal(got, contents) {
+			t.Fatal("contents differ after a round trip")
+		}
+		return f
+	}
+
+	for _, tc := range []struct {
+		name string
+		enc  EncryptionMethod
+	}{
+		{"plain", 0},
+		{"zipcrypto", StandardEncryption},
+		{"aes256", AES256Encryption},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if f := write(t, tc.enc, true); f.CompressedSize64 < f.UncompressedSize64 {
+				t.Errorf("registered compressor not used: %d bytes compressed to %d",
+					f.UncompressedSize64, f.CompressedSize64)
+			}
+			// The registration belongs to one Writer; others keep the default.
+			if f := write(t, tc.enc, false); f.CompressedSize64 >= f.UncompressedSize64 {
+				t.Errorf("default compressor not used: %d bytes compressed to %d",
+					f.UncompressedSize64, f.CompressedSize64)
+			}
+		})
 	}
 }
 
